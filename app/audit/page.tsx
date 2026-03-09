@@ -138,6 +138,19 @@ const QUESTIONS: Question[] = [
   },
 ];
 
+// ─── Answer helpers ───────────────────────────────────────────────────────────
+
+function isRealAnswer(answer: Answer | undefined): boolean {
+  if (answer === undefined) return false;
+  if (typeof answer === 'string')
+    return answer.length > 0 && !answer.toLowerCase().startsWith('not sure');
+  return (answer as string[]).some(v => !v.toLowerCase().startsWith('not sure'));
+}
+
+function countRealAnswers(ans: Answers): number {
+  return QUESTIONS.filter(q => isRealAnswer(ans[q.step])).length;
+}
+
 // ─── Scoring ──────────────────────────────────────────────────────────────────
 
 function calculateScores(answers: Answers): Scores {
@@ -520,7 +533,7 @@ function QuestionScreen({
         </div>
       )}
 
-      <div className="mt-10 flex items-center gap-5">
+      <div className="mt-10 flex items-center">
         {question.step > 1 && (
           <button
             onClick={onBack}
@@ -532,9 +545,10 @@ function QuestionScreen({
             Back
           </button>
         )}
+        <div className="flex-1" />
         <button
           onClick={onSkip}
-          className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
+          className="text-xs text-slate-600 hover:text-slate-400 transition-colors mr-5"
         >
           Skip
         </button>
@@ -542,7 +556,7 @@ function QuestionScreen({
           onClick={onNext}
           disabled={!canProceed}
           className={`
-            ml-auto flex items-center gap-2 rounded-full px-7 py-3.5 text-sm font-semibold transition-all
+            flex items-center gap-2 rounded-full px-7 py-3.5 text-sm font-semibold transition-all
             ${canProceed
               ? 'bg-indigo-600 text-white hover:bg-indigo-500 hover:scale-105 shadow-lg shadow-indigo-500/20 active:scale-100'
               : 'bg-white/5 text-slate-600 cursor-not-allowed'
@@ -567,10 +581,12 @@ function ResultsScreen({
   scores,
   opportunities,
   quickWin,
+  onRetake,
 }: {
   scores: Scores;
   opportunities: Opportunity[];
   quickWin: string;
+  onRetake: () => void;
 }) {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -589,9 +605,9 @@ function ResultsScreen({
         <Link href="/" className="text-lg font-bold tracking-tight">
           Audit<span className="text-indigo-400">IQ</span>
         </Link>
-        <Link href="/audit" className="text-sm text-slate-500 hover:text-white transition-colors">
+        <button onClick={onRetake} className="text-sm text-slate-500 hover:text-white transition-colors">
           ← Retake audit
-        </Link>
+        </button>
       </nav>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 pb-24 space-y-6 anim-fadeup">
@@ -770,6 +786,7 @@ export default function AuditPage() {
   const [step, setStep] = useState(1);
   const [answers, setAnswers] = useState<Answers>({});
   const [showResults, setShowResults] = useState(false);
+  const [fromGate, setFromGate] = useState(false);
   const [animDir, setAnimDir] = useState<'forward' | 'back'>('forward');
   const [animKey, setAnimKey] = useState(0);
 
@@ -778,6 +795,12 @@ export default function AuditPage() {
   function goNext() {
     if (step === QUESTIONS.length) {
       setShowResults(true);
+      setFromGate(false);
+      return;
+    }
+    if (fromGate && countRealAnswers(answers) >= 4) {
+      setShowResults(true);
+      setFromGate(false);
       return;
     }
     setAnimDir('forward');
@@ -793,13 +816,17 @@ export default function AuditPage() {
   }
 
   function goSkip() {
-    setAnswers(prev => {
-      const next = { ...prev };
-      delete next[step];
-      return next;
-    });
+    const newAnswers = { ...answers };
+    delete newAnswers[step];
+    setAnswers(newAnswers);
     if (step === QUESTIONS.length) {
       setShowResults(true);
+      setFromGate(false);
+      return;
+    }
+    if (fromGate && countRealAnswers(newAnswers) >= 4) {
+      setShowResults(true);
+      setFromGate(false);
       return;
     }
     setAnimDir('forward');
@@ -807,14 +834,81 @@ export default function AuditPage() {
     setStep(s => s + 1);
   }
 
+  function goToStep(targetStep: number) {
+    setShowResults(false);
+    setFromGate(true);
+    setAnimDir('forward');
+    setAnimKey(k => k + 1);
+    setStep(targetStep);
+  }
+
   function handleAnswer(val: Answer) {
     setAnswers(prev => ({ ...prev, [step]: val }));
   }
 
+  function retake() {
+    setAnswers({});
+    setStep(1);
+    setFromGate(false);
+    setAnimDir('forward');
+    setAnimKey(k => k + 1);
+    setShowResults(false);
+  }
+
   if (showResults) {
+    const realCount = countRealAnswers(answers);
+    if (realCount < 4) {
+      const needed = 4 - realCount;
+      const unanswered = QUESTIONS.filter(q => !isRealAnswer(answers[q.step]));
+      return (
+        <main className="min-h-screen bg-[#0a0a0f] text-white flex flex-col">
+          <nav className="px-6 py-5 flex items-center max-w-2xl mx-auto w-full">
+            <Link href="/" className="text-lg font-bold tracking-tight">
+              Audit<span className="text-indigo-400">IQ</span>
+            </Link>
+          </nav>
+          <div className="flex-1 flex items-center justify-center px-6 py-12">
+            <div className="max-w-md w-full anim-fadeup">
+              <p className="text-3xl mb-4">🔒</p>
+              <h2 className="text-2xl font-bold text-white mb-2">Almost there</h2>
+              <p className="text-slate-400 leading-relaxed mb-8">
+                Answer{' '}
+                <span className="text-white font-medium">
+                  {needed} more question{needed !== 1 ? 's' : ''}
+                </span>{' '}
+                to unlock your results.
+              </p>
+              <p className="text-[11px] font-bold tracking-[0.18em] text-slate-500 uppercase mb-3">
+                Answer a few more to unlock your results:
+              </p>
+              <div className="space-y-2">
+                {unanswered.map(q => (
+                  <button
+                    key={q.step}
+                    onClick={() => goToStep(q.step)}
+                    className="w-full flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5 text-left hover:border-indigo-500/30 hover:bg-indigo-500/[0.05] transition-all group"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 text-xs text-slate-500 group-hover:border-indigo-500/40 group-hover:text-indigo-400 transition-colors">
+                      {q.step}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-semibold tracking-widest text-slate-600 uppercase mb-0.5">{q.category}</p>
+                      <p className="text-sm text-slate-300 group-hover:text-white transition-colors truncate">{q.question}</p>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-slate-700 group-hover:text-indigo-400 transition-colors">
+                      <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </main>
+      );
+    }
     const scores = calculateScores(answers);
     const { opportunities, quickWin } = generateReport(answers, scores);
-    return <ResultsScreen scores={scores} opportunities={opportunities} quickWin={quickWin} />;
+    return <ResultsScreen scores={scores} opportunities={opportunities} quickWin={quickWin} onRetake={retake} />;
   }
 
   return (
