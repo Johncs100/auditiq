@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -582,11 +583,13 @@ function ResultsScreen({
   opportunities,
   quickWin,
   onRetake,
+  onEmailSubmit,
 }: {
   scores: Scores;
   opportunities: Opportunity[];
   quickWin: string;
   onRetake: () => void;
+  onEmailSubmit: (email: string) => void;
 }) {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -754,7 +757,7 @@ function ResultsScreen({
                   className="flex-1 rounded-full bg-white/[0.04] border border-white/[0.08] px-5 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors"
                 />
                 <button
-                  onClick={() => { if (email.includes('@')) setSubmitted(true); }}
+                  onClick={() => { if (email.includes('@')) { setSubmitted(true); onEmailSubmit(email); } }}
                   className="rounded-full bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-500 transition-colors"
                 >
                   Send Report
@@ -789,6 +792,39 @@ export default function AuditPage() {
   const [fromGate, setFromGate] = useState(false);
   const [animDir, setAnimDir] = useState<'forward' | 'back'>('forward');
   const [animKey, setAnimKey] = useState(0);
+  const [recordId, setRecordId] = useState<string | null>(null);
+
+  // Save responses to Supabase once when real results are first shown
+  const isRealResults = showResults && countRealAnswers(answers) >= 4;
+  useEffect(() => {
+    if (!isRealResults || recordId) return;
+    const scores = calculateScores(answers);
+    supabase
+      .from('audit_responses')
+      .insert({
+        answers,
+        scores: {
+          overall: scores.overall,
+          processMat: scores.processMat,
+          dataReady: scores.dataReady,
+          implReady: scores.implReady,
+          label: scores.label,
+        },
+        business_type: (answers[1] as string) ?? null,
+        team_size: (answers[2] as string) ?? null,
+      })
+      .select('id')
+      .single()
+      .then(({ data }) => { if (data) setRecordId(data.id); });
+  }, [isRealResults]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleEmailSubmit(email: string) {
+    if (!recordId) return;
+    await supabase
+      .from('audit_responses')
+      .update({ email })
+      .eq('id', recordId);
+  }
 
   const question = QUESTIONS[step - 1];
 
@@ -853,6 +889,7 @@ export default function AuditPage() {
     setAnimDir('forward');
     setAnimKey(k => k + 1);
     setShowResults(false);
+    setRecordId(null);
   }
 
   if (showResults) {
@@ -908,7 +945,7 @@ export default function AuditPage() {
     }
     const scores = calculateScores(answers);
     const { opportunities, quickWin } = generateReport(answers, scores);
-    return <ResultsScreen scores={scores} opportunities={opportunities} quickWin={quickWin} onRetake={retake} />;
+    return <ResultsScreen scores={scores} opportunities={opportunities} quickWin={quickWin} onRetake={retake} onEmailSubmit={handleEmailSubmit} />;
   }
 
   return (
